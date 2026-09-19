@@ -19,7 +19,7 @@ object TransactionParser {
             val pattern=r.optString("regex")
             if(pattern.isBlank()) continue
             val m=Regex(pattern).find(body) ?: continue
-            val amountText=(m.groups.getOrNull(1)?.value ?: Regex("(?:₹|INR|Rs\\.?\\s*)([0-9,]+(?:\\.[0-9]{1,2})?)",RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)) ?: continue
+            val amountText=(m.groups[1]?.value ?: Regex("(?:₹|INR|Rs\\.?\\s*)([0-9,]+(?:\\.[0-9]{1,2})?)",RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)) ?: continue
             val amount=amountText.replace(",","").toDoubleOrNull() ?: continue
             val lower=body.lowercase()
             val income=Regex("\\b(credited|received|refund|cashback|salary)\\b").containsMatchIn(lower) && !Regex("\\b(debited|spent|paid|withdrawn)\\b").containsMatchIn(lower)
