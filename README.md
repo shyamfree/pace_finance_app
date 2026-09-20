@@ -1,31 +1,30 @@
 # Pace Android
 
-Native Android build of Pace with bank/payment transaction import support.
+Pace is an Android finance app built around the existing Pace web UI with native Android transaction-import features.
 
-## Features
-- Existing Pace PWA UI embedded in a native WebView.
+## Included in v3
+
 - Bank SMS transaction detection.
-- Android NotificationListenerService for bank/UPI/payment notifications.
-- Configurable sample-message rules with optional regex and sender/app keyword.
-- Persistent native pending transaction store, so dismissing/removing a notification does not lose the detected transaction.
-- Review notification with Add/Ignore actions.
-- Editable amount, merchant/note, type and category before adding.
-- Duplicate fingerprint protection.
-- Local Pace storage remains on-device.
+- Payment/bank notification detection using Android Notification Listener.
+- Context-aware debit/credit classification. For example, `Acct debited ... recipient credited` is treated as an expense because the user's account was debited.
+- Amount, merchant, transaction date, UPI/UTR/RRN reference and source extraction.
+- Review notification before live transactions are added.
+- Historical SMS import: choose multiple bank/payment sender IDs, select individual messages, parse them using their original dates, and import the selected transactions.
+- Duplicate protection using a transaction fingerprint.
+- Custom bank message rules with optional sample message and regex.
+- Every imported transaction remains editable after it is added, including type, amount, date, category, merchant/note and UPI/reference.
+- User-managed expense and income categories: add and rename categories.
+- Daily spending limit setting.
+- Daily spending line graph with the daily-limit reference line.
+- Existing monthly income/expense and six-month trend views.
+- Local device storage through the existing Pace data store.
+
+## Android permissions
+
+Pace requests SMS access for transaction detection and historical import, and notification access for payment/bank notification detection. These permissions are optional until the corresponding features are used, and Android displays the system permission/access UI.
 
 ## Build
-GitHub Actions workflow: `.github/workflows/android.yml`.
-Run it manually from GitHub Actions or push to `main`/`master`.
 
-The APK artifacts are produced under the Actions run.
+GitHub Actions builds both a debug APK and an unsigned release APK. The workflow uses Android SDK 35, JDK 17 and Gradle 8.9.
 
-## Android setup
-After installing the APK:
-1. Allow SMS permission if you want bank SMS detection.
-2. Allow notification permission on Android 13+.
-3. Open Pace > Settings > Bank & payment imports.
-4. Enable Notification access for Pace if you want payment-app/bank notification detection.
-5. Paste a sample bank message and optionally add a regex. Amount must be capture group 1 for a custom regex.
-
-## Privacy
-No transaction data is uploaded by this project. SMS/notification content is processed locally on the device and stored locally until reviewed/added/ignored.
+The debug APK is published as the `pace-debug-apk` workflow artifact.

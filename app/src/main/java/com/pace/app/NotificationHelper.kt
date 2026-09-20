@@ -19,5 +19,9 @@ object NotificationHelper{
   val n=NotificationCompat.Builder(c,CHANNEL).setSmallIcon(com.pace.app.R.drawable.pace_icon).setContentTitle("New ${if(t.optString("type")=="income")"credit" else "expense"} detected").setContentText("$amount · ${t.optString("note","Transaction")}").setStyle(NotificationCompat.BigTextStyle().bigText("$amount\n${t.optString("note","Transaction")}\nReview before adding to Pace.")).setAutoCancel(false).setPriority(NotificationCompat.PRIORITY_HIGH).addAction(0,"Review",review).addAction(0,"Ignore",ignore).setContentIntent(review).build()
   nm.notify(t.optString("fingerprint").hashCode(),n)
  }
+ fun cancel(c: Context, fingerprint: String) {
+  if (fingerprint.isBlank()) return
+  (c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(fingerprint.hashCode())
+ }
 }
 class IgnoreReceiver:android.content.BroadcastReceiver(){override fun onReceive(c:Context,i:Intent){val fp=i.getStringExtra("fp")?:return;TransactionStore.ignored(c,fp);TransactionStore.removePending(c,fp);(c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(fp.hashCode())}}

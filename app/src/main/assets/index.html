@@ -150,6 +150,8 @@ li:first-child>.row{border-top:0}
 .hero .btn{border-color:rgba(241,245,239,.4);color:var(--hero-ink)}
 .hero .btn.light{background:var(--hero-ink);color:var(--hero-bg);border-color:var(--hero-ink)}
 
+
+.graph-wrap{overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--bg);padding:8px 8px 2px;margin-top:12px}.graph-wrap svg{display:block;width:100%;height:auto}.daily-line{stroke:var(--accent);stroke-width:2.5}.daily-dot{fill:var(--accent)}.daily-limit{stroke:var(--bad);stroke-width:1.5;stroke-dasharray:5 4}.daily-key{display:inline-block;width:18px;border-top:3px solid var(--accent);vertical-align:middle;margin-right:5px}.limit-key{display:inline-block;width:18px;border-top:2px dashed var(--bad);vertical-align:middle;margin-right:5px}
 dialog{border:0;padding:0;width:100%;max-width:560px;margin:auto auto 0;max-height:92vh;max-height:92dvh;background:var(--surface);color:var(--ink);border-radius:24px 24px 0 0;overflow:auto}
 dialog::backdrop{background:rgba(8,16,20,.55)}
 .sheet{padding:18px 20px calc(20px + env(safe-area-inset-bottom,0px))}
@@ -206,7 +208,8 @@ dialog::backdrop{background:rgba(8,16,20,.55)}
     <fieldset class="chips" id="chips"><legend class="sr">Category</legend></fieldset>
     <div class="two">
       <label class="f"><span>Date</span><input type="date" id="dt"></label>
-      <label class="f"><span>Note</span><input type="text" id="note" maxlength="80" placeholder="Optional" autocomplete="off"></label>
+      <label class="f"><span>Merchant / note</span><input type="text" id="note" maxlength="80" placeholder="Optional" autocomplete="off"></label>
+      <label class="f"><span>UPI / transaction reference</span><input type="text" id="ref" maxlength="40" placeholder="Optional" autocomplete="off"></label>
     </div>
     <p class="err" id="txErr" role="alert"></p>
     <div class="actions">
@@ -229,7 +232,11 @@ dialog::backdrop{background:rgba(8,16,20,.55)}
     </div>
     <h3 class="set-h">Bank & payment imports</h3>
     <p class="muted">Detect bank SMS and payment-app notifications, keep a copy inside Pace, and review each transaction before adding it.</p>
-    <div class="btnrow"><button type="button" class="btn" data-act="import-settings">Import settings</button></div>
+    <div class="btnrow"><button type="button" class="btn" data-act="import-settings">Import settings</button><button type="button" class="btn" data-act="import-history">Import previous SMS</button></div>
+    <label class="f set-row"><span>Daily spending limit</span><input id="dailyLimit" inputmode="decimal" placeholder="No daily limit"></label>
+    <h3 class="set-h">Categories</h3>
+    <p class="muted">Add, rename, or remove your own expense and income categories. Existing transactions stay safe when a category is removed.</p>
+    <div id="catMgr"></div>
     <h3 class="set-h">Your data</h3>
     <p class="muted" id="storeNote">Everything is stored on this device only. Copy a backup before you clear your browser data or switch phones.</p>
     <div class="btnrow"><button type="button" class="btn" id="copyBk">Copy backup</button></div>
@@ -255,19 +262,20 @@ var EXP=[
 var INC=[
  {id:'salary',name:'Salary',color:'#1F7A5C'},{id:'side',name:'Side income',color:'#3AA37E'},
  {id:'gifts',name:'Gifts',color:'#5B8DEF'},{id:'otherinc',name:'Other income',color:'#7C8794'}];
-function catById(id){var a=EXP.concat(INC);for(var i=0;i<a.length;i++)if(a[i].id===id)return a[i];return {id:id,name:'Other',color:'#7C8794'}}
+function allCats(type){var base=type==='income'?INC:EXP; var extra=(S&&S.categories&&S.categories[type])||[]; return base.concat(extra.filter(function(x){return !base.some(function(b){return b.id===x.id})}));}
+function catById(id){var a=EXP.concat(INC);if(typeof S!=='undefined'&&S.categories)a=a.concat((S.categories.expense||[]),(S.categories.income||[]));for(var i=0;i<a.length;i++)if(a[i].id===id){var c={id:a[i].id,name:a[i].name,color:a[i].color};if(typeof S!=='undefined'&&S.categoryNames&&S.categoryNames[id])c.name=S.categoryNames[id];return c;}return {id:id,name:id||'Other',color:'#7C8794'}}
 
 /* ---------- state ---------- */
 var KEY='pace.v1';
 var REGION={IN:'INR',US:'USD',GB:'GBP',CA:'CAD',AU:'AUD',NG:'NGN',KE:'KES',ZA:'ZAR',PH:'PHP',ID:'IDR',PK:'PKR',BD:'BDT',AE:'AED',SG:'SGD',JP:'JPY',DE:'EUR',FR:'EUR',ES:'EUR',IT:'EUR',NL:'EUR',IE:'EUR',BR:'BRL',MX:'MXN',GH:'GHS',EG:'EGP',LK:'LKR',NP:'NPR',MY:'MYR',TH:'THB',VN:'VND',TR:'TRY',SA:'SAR'};
 function guessCur(){var l=(navigator.language||'en-US').split('-')[1];return REGION[(l||'').toUpperCase()]||'USD'}
-function defaults(){return {tx:[],budget:{total:0,cats:{}},cur:guessCur(),theme:'auto',last:{}}}
+function defaults(){return {tx:[],budget:{total:0,cats:{}},dailyLimit:0,categories:{expense:[],income:[]},categoryNames:{},cur:guessCur(),theme:'auto',last:{}}}
 var memoryOnly=false;
 function load(){
   try{
     var raw=localStorage.getItem(KEY);
     if(raw){var o=JSON.parse(raw),d=defaults();
-      return {tx:Array.isArray(o.tx)?o.tx:[],budget:{total:(o.budget&&o.budget.total)||0,cats:(o.budget&&o.budget.cats)||{}},cur:o.cur||d.cur,theme:o.theme||'auto',last:o.last||{}};}
+      return {tx:Array.isArray(o.tx)?o.tx:[],budget:{total:(o.budget&&o.budget.total)||0,cats:(o.budget&&o.budget.cats)||{}},dailyLimit:+o.dailyLimit||0,categories:{expense:Array.isArray(o.categories&&o.categories.expense)?o.categories.expense:[],income:Array.isArray(o.categories&&o.categories.income)?o.categories.income:[]},categoryNames:o.categoryNames||{},cur:o.cur||d.cur,theme:o.theme||'auto',last:o.last||{}};}
   }catch(e){}
   return defaults();
 }
@@ -279,9 +287,23 @@ window.PaceNativeImport=function(t){
   if(!t||!t.amount)return;
   var fp=String(t.fingerprint||'');
   if(fp && S.tx.some(function(x){return x.sourceFingerprint===fp;}))return;
+  // Second line of defence: SMS and payment-app notifications may describe the
+  // same transaction with different source text. Do not create another record
+  // when amount, type, date and UPI reference/merchant identify the same payment.
+  var amt=Number(t.amount), typ=t.type==='income'?'income':'expense', dt=String(t.date||ymd(new Date()));
+  var ref=String(t.upiReference||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  var merch=String(t.merchant||t.note||'').toLowerCase().replace(/[^a-z0-9@]+/g,' ').trim();
+  var duplicate=S.tx.some(function(x){
+    if(x.type!==typ || Math.abs(Number(x.amt)-amt)>0.009 || String(x.date||'')!==dt)return false;
+    var xr=String(x.upiReference||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+    if(ref && xr)return ref===xr;
+    var xm=String(x.merchant||x.note||'').toLowerCase().replace(/[^a-z0-9@]+/g,' ').trim();
+    return !ref && (!merch || !xm || xm===merch || xm.indexOf(merch)>=0 || merch.indexOf(xm)>=0);
+  });
+  if(duplicate)return;
   var cat=t.category||'other';
-  if(!EXP.some(function(x){return x.id===cat;}))cat='other';
-  S.tx.push({id:uid(),type:t.type==='income'?'income':'expense',amt:Number(t.amount),cat:cat,date:t.date||ymd(new Date()),note:String(t.note||'').slice(0,80),source:'bank-import',sourceFingerprint:fp});
+  if(!catById(cat)||catById(cat).id!==cat)cat='other';
+  S.tx.push({id:uid(),type:t.type==='income'?'income':'expense',amt:Number(t.amount),cat:cat,date:t.date||ymd(new Date()),note:String(t.note||'').slice(0,80),merchant:String(t.merchant||''),upiReference:String(t.upiReference||''),source:String(t.source||'bank-import'),sender:String(t.sender||''),raw:String(t.raw||''),sourceFingerprint:fp});
   save(); render();
 };
 var V={tab:'overview',month:null,filter:'all',q:''};
@@ -409,7 +431,7 @@ function overviewHTML(){
   var html=heroHTML(k,st,B);
   html+='<dl class="stats"><div class="stat"><dt>Income</dt><dd>'+money(st.inc,true)+'</dd></div><div class="stat"><dt>Spent</dt><dd>'+money(st.exp,true)+'</dd></div><div class="stat"><dt>Net</dt><dd class="'+(net>0?'pos':net<0?'neg':'')+'">'+(net>0?'+':net<0?'\u2212':'')+money(Math.abs(net),true)+'</dd></div></dl>';
   /* categories */
-  var ids=EXP.map(function(c){return c.id}).filter(function(id){return st.cats[id]>0||S.budget.cats[id]>0});
+  var ids=allCats('expense').map(function(c){return c.id}).filter(function(id){return st.cats[id]>0||S.budget.cats[id]>0});
   Object.keys(st.cats).forEach(function(id){if(ids.indexOf(id)<0)ids.push(id)});
   ids.sort(function(a,b){return (st.cats[b]||0)-(st.cats[a]||0)});
   html+='<section class="sec"><div class="sec-h"><h2>Where it went</h2></div>';
@@ -424,6 +446,7 @@ function overviewHTML(){
     }).join('')+'</ul>';
   }
   html+='</section>';
+  html+='<section class="sec"><div class="sec-h"><h2>Daily spending</h2></div><p class="muted">Actual spending by day compared with your daily limit.</p>'+dailyGraphSVG(k)+'</section>';
   html+='<section class="sec trend"><div class="sec-h"><h2>Last six months</h2></div>'+trendSVG()+'<div class="key"><span><i style="background:var(--good)"></i>Income</span><span><i style="background:var(--bad)"></i>Spent</span></div></section>';
   /* latest */
   var latest=S.tx.filter(function(t){return t.date.indexOf(k)===0}).sort(cmpTx).slice(0,5);
@@ -431,6 +454,20 @@ function overviewHTML(){
   html+=latest.length?'<ul>'+latest.map(rowHTML).join('')+'</ul>':'<p class="empty">Nothing yet. Tap Add to record a transaction.</p>';
   html+='</section>';
   return html;
+}
+
+function dailyGraphSVG(k){
+  var p=k.split('-').map(Number),D=new Date(p[0],p[1],0).getDate(),days=[],i;
+  for(i=1;i<=D;i++){var d=p[0]+'-'+pad(p[1])+'-'+pad(i),v=0;S.tx.forEach(function(t){if(t.date===d&&t.type==='expense')v+=Number(t.amt)||0});days.push({d:d,v:r2(v),n:i})}
+  var max=Math.max(1,S.dailyLimit||0);days.forEach(function(x){if(x.v>max)max=x.v});max*=1.15;
+  var W=340,H=190,L=28,R=8,T=12,B=30,iw=W-L-R,ih=H-T-B;
+  var pts=days.map(function(x,j){var xx=L+(days.length===1?0:(j/(days.length-1))*iw),yy=T+ih-(x.v/max*ih);return [xx,yy,x.v,x.n]});
+  var path=pts.map(function(q,j){return (j?'L':'M')+q[0].toFixed(1)+' '+q[1].toFixed(1)}).join(' ');
+  var limitY=S.dailyLimit?T+ih-(S.dailyLimit/max*ih):null;
+  var dots=pts.map(function(q){return '<circle cx="'+q[0].toFixed(1)+'" cy="'+q[1].toFixed(1)+'" r="2.2" class="daily-dot"/>'}).join('');
+  var labels=pts.filter(function(q){return q[3]===1||q[3]===Math.ceil(D/2)||q[3]===D}).map(function(q){return '<text x="'+q[0].toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle">'+q[3]+'</text>'}).join('');
+  var aria='Daily spending: '+days.map(function(x){return x.n+' '+money(x.v,true)}).join(', ')+(S.dailyLimit?' . Daily limit '+money(S.dailyLimit,true):'');
+  return '<div class="graph-wrap"><svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(aria)+'"><line x1="'+L+'" x2="'+(W-R)+'" y1="'+(T+ih)+'" y2="'+(T+ih)+'" stroke="var(--line)"/><path d="'+path+'" class="daily-line" fill="none"/>'+dots+(limitY!==null?'<line x1="'+L+'" x2="'+(W-R)+'" y1="'+limitY.toFixed(1)+'" y2="'+limitY.toFixed(1)+'" class="daily-limit"/>':'')+labels+'</svg></div><div class="key"><span><i class="daily-key"></i>Actual</span>'+(S.dailyLimit?'<span><i class="limit-key"></i>Daily limit '+money(S.dailyLimit,true)+'</span>':'<span>Set a daily limit in Settings</span>')+'</div>';
 }
 
 function trendSVG(){
@@ -491,7 +528,7 @@ function renderList(){
 
 function budgetsHTML(){
   var st=monthStats(ym(new Date()));
-  var rows=EXP.map(function(c){
+  var rows=allCats('expense').map(function(c){
     return '<li class="brow"><label for="cb-'+c.id+'"><i class="dot" style="background:'+c.color+'"></i><span class="bn">'+c.name+'</span><span class="bs">'+money(st.cats[c.id]||0,true)+' spent this month</span></label><span class="inp"><span>'+esc(sym())+'</span><input id="cb-'+c.id+'" data-cat="'+c.id+'" inputmode="decimal" placeholder="No limit" autocomplete="off" value="'+(S.budget.cats[c.id]||'')+'"></span></li>';
   }).join('');
   return '<section class="bsec"><h2 class="h">Monthly budget</h2><p class="lead">Pace compares your spending with this amount, day by day.</p>'+
@@ -524,7 +561,7 @@ $$('dialog').forEach(function(d){
 var editing=null;
 function curType(){return $('input[name="type"]:checked').value}
 function buildChips(type,sel){
-  var list=type==='income'?INC:EXP;
+  var list=allCats(type);
   $('#chips').innerHTML='<legend class="sr">Category</legend>'+list.map(function(c){
     return '<label class="chip"><input type="radio" name="cat" value="'+c.id+'"'+(sel===c.id?' checked':'')+'><span><i class="dot" style="background:'+c.color+'"></i>'+c.name+'</span></label>';
   }).join('');
@@ -537,7 +574,7 @@ function openTx(id){
   $$('input[name="type"]').forEach(function(r){r.checked=r.value===t.type});
   buildChips(t.type,editing?t.cat:(S.last[t.type]||''));
   $('#amt').value=editing?String(t.amt):'';
-  $('#dt').value=t.date;$('#note').value=t.note||'';
+  $('#dt').value=t.date;$('#note').value=t.note||'';$('#ref').value=t.upiReference||'';
   $('#sym').textContent=sym();$('#txErr').textContent='';
   $('#delBtn').hidden=!editing;updateSaveLabel();
   openDlg($('#txDlg'));
@@ -549,9 +586,9 @@ $('#txForm').addEventListener('submit',function(e){
   var amt=parseAmt($('#amt').value),type=curType(),catEl=$('input[name="cat"]:checked'),err=$('#txErr');
   if(!(amt>0)){err.textContent='Enter an amount greater than 0.';$('#amt').focus();return}
   if(!catEl){err.textContent='Pick a category.';return}
-  var date=$('#dt').value||ymd(new Date()),note=$('#note').value.trim();
-  if(editing){editing.type=type;editing.amt=amt;editing.cat=catEl.value;editing.date=date;editing.note=note}
-  else S.tx.push({id:uid(),type:type,amt:amt,cat:catEl.value,date:date,note:note});
+  var date=$('#dt').value||ymd(new Date()),note=$('#note').value.trim(),ref=$('#ref').value.trim();
+  if(editing){editing.type=type;editing.amt=amt;editing.cat=catEl.value;editing.date=date;editing.note=note;editing.upiReference=ref}
+  else S.tx.push({id:uid(),type:type,amt:amt,cat:catEl.value,date:date,note:note,upiReference:ref});
   S.last[type]=catEl.value;save();
   var was=!!editing;editing=null;closeDlg($('#txDlg'));
   var k=date.slice(0,7);if(k>ym(new Date()))k=ym(new Date());V.month=k;
@@ -566,12 +603,31 @@ $('#delBtn').addEventListener('click',function(){
 /* ---------- settings ---------- */
 var CURS=['USD','EUR','GBP','INR','CAD','AUD','NGN','KES','GHS','ZAR','EGP','AED','SAR','PKR','BDT','LKR','NPR','PHP','IDR','MYR','SGD','THB','VND','JPY','CNY','KRW','BRL','MXN','TRY'];
 function setMsg(t){$('#setMsg').textContent=t}
+function renderCategoryManager(){
+  var box=$('#catMgr');if(!box)return;
+  var groups=[['expense','Expense categories',allCats('expense')],['income','Income categories',allCats('income')]];
+  box.innerHTML=groups.map(function(g){return '<div class="btnrow"><b>'+g[1]+'</b></div><div class="btnrow">'+g[2].map(function(c){return '<button type="button" class="btn" data-cat-manage="rename" data-cat-type="'+g[0]+'" data-cat-id="'+esc(c.id)+'">'+esc(catById(c.id).name)+'</button>'}).join('')+'</div><div class="btnrow"><button type="button" class="btn" data-cat-add="'+g[0]+'">+ Add '+(g[0]==='expense'?'expense':'income')+' category</button></div>';}).join('');
+}
+function addCustomCategory(type){
+  var name=window.prompt('Category name');if(!name||!name.trim())return;name=name.trim().slice(0,30);
+  var id=(type==='income'?'inc-':'exp-')+name.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'-'+Date.now().toString(36);
+  var color=['#D9822B','#3B6FD4','#1F9E8F','#7B5CC9','#D64B6B','#B8952A','#4FA34A','#7C8794','#5B8DEF'][((S.categories[type]||[]).length)%9];
+  S.categories[type].push({id:id,name:name,color:color});save();renderCategoryManager();render();toast('Category added');
+}
+function renameCustomCategory(type,id){
+  var c=catById(id);if(!c)return;
+  var name=window.prompt('Rename category',c.name);if(!name||!name.trim())return;
+  if(!S.categoryNames)S.categoryNames={};S.categoryNames[id]=name.trim().slice(0,30);
+  (S.categories[type]||[]).forEach(function(x){if(x.id===id)x.name=S.categoryNames[id]});save();renderCategoryManager();render();toast('Category renamed');
+}
+
+
 function openSettings(){
   var names=null;try{names=new Intl.DisplayNames(undefined,{type:'currency'})}catch(e){}
   var list=CURS.indexOf(S.cur)<0?[S.cur].concat(CURS):CURS;
   $('#curSel').innerHTML=list.map(function(c){var n='';try{n=names?names.of(c):''}catch(e){}return '<option value="'+c+'"'+(c===S.cur?' selected':'')+'>'+c+(n&&n!==c?' \u2013 '+esc(n):'')+'</option>'}).join('');
   $$('input[name="theme"]').forEach(function(r){r.checked=r.value===S.theme});
-  $('#restoreTxt').value='';setMsg('');
+  $('#restoreTxt').value='';$('#dailyLimit').value=S.dailyLimit||'';renderCategoryManager();setMsg('');
   $('#storeNote').textContent=memoryOnly?'Storage is unavailable here, so your entries last only until you close this page. Use Copy backup to keep them.':'Everything is stored on this device only. Copy a backup before you clear your browser data or switch phones.';
   openDlg($('#setDlg'));
 }
@@ -595,7 +651,7 @@ $('#restoreBtn').addEventListener('click',function(){
   arm(btn,'Tap again to replace current data',function(){
     var ok=o.tx.filter(function(t){return t&&(t.type==='expense'||t.type==='income')&&typeof t.amt==='number'&&t.amt>0&&/^\d{4}-\d{2}-\d{2}$/.test(t.date)}).map(function(t){return {id:String(t.id||uid()),type:t.type,amt:r2(t.amt),cat:String(t.cat||'other'),date:t.date,note:String(t.note||'').slice(0,80)}});
     var d=defaults();
-    S={tx:ok,budget:{total:(o.budget&&+o.budget.total)||0,cats:(o.budget&&o.budget.cats)||{}},cur:o.cur||d.cur,theme:o.theme||'auto',last:{}};
+    S={tx:ok,budget:{total:(o.budget&&+o.budget.total)||0,cats:(o.budget&&o.budget.cats)||{}},dailyLimit:+o.dailyLimit||0,categories:{expense:Array.isArray(o.categories&&o.categories.expense)?o.categories.expense:[],income:Array.isArray(o.categories&&o.categories.income)?o.categories.income:[]},categoryNames:o.categoryNames||{},cur:o.cur||d.cur,theme:o.theme||'auto',last:{}};
     nfCache={};save();applyTheme();render();closeDlg($('#setDlg'));toast('Restored '+ok.length+' transactions');
   });
 });
@@ -641,13 +697,17 @@ document.addEventListener('click',function(e){
   else if(a==='edit')openTx(el.getAttribute('data-id'));
   else if(a==='settings')openSettings();
   else if(a==='import-settings'){if(window.PaceNative&&window.PaceNative.openImportSettings)window.PaceNative.openImportSettings();else toast('Import settings are available in the Android app.');}
+  else if(a==='import-history'){if(window.PaceNative&&window.PaceNative.importPreviousMessages)window.PaceNative.importPreviousMessages();else toast('Historical SMS import is available in the Android app.');}
   else if(a==='filter'){V.filter=el.getAttribute('data-f');render()}
   else if(a==='sample'){addSample();render();toast('Sample data added')}
   else if(a==='goto-budget'){V.tab='budgets';window.scrollTo(0,0);render()}
+  if(el.hasAttribute('data-cat-add'))addCustomCategory(el.getAttribute('data-cat-add'));
+  if(el.hasAttribute('data-cat-manage'))renameCustomCategory(el.getAttribute('data-cat-type'),el.getAttribute('data-cat-id'));
 });
 document.addEventListener('input',function(e){
   var el=e.target;
   if(el.id==='budTotal'){S.budget.total=parseAmt(el.value);save();updateBudgetHint()}
+  else if(el.id==='dailyLimit'){S.dailyLimit=parseAmt(el.value);save();render();}
   else if(el.getAttribute&&el.getAttribute('data-cat')){var v=parseAmt(el.value),c=el.getAttribute('data-cat');if(v>0)S.budget.cats[c]=v;else delete S.budget.cats[c];save();updateBudgetHint()}
   else if(el.id==='q'){V.q=el.value;renderList()}
 });
