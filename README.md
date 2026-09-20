@@ -23,7 +23,7 @@ The SMS received timestamp and the transaction date extracted from the SMS are k
 - Imported transactions remain in Pace even if the original SMS is later deleted.
 - Imported transaction fields remain editable.
 - Bank sender/rule configuration is available from Import settings.
-- `versionCode` is 5 and `versionName` is 5.0.0.
+- `versionCode` is 6 and `versionName` is 6.0.0.
 
 ## GitHub Actions signing
 
