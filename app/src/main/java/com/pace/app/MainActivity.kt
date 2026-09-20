@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.provider.Telephony
 import android.provider.Settings
 import android.view.View
+import android.view.WindowManager
 import android.widget.*
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
@@ -149,7 +150,29 @@ class MainActivity : AppCompatActivity() {
         chooseImportDateRange()
     }
 
+    private var importWizardDialog: Dialog? = null
+
+    private data class ImportSender(val address: String, val count: Int)
+
+    private fun makeWizardButton(text: String, onClick: () -> Unit): Button {
+        return Button(this).apply {
+            this.text = text
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun showImportWizard(dialog: Dialog, content: View) {
+        dialog.setContentView(content)
+        if (!dialog.isShowing) dialog.show()
+    }
+
     private fun chooseImportDateRange() {
+        val dialog = Dialog(this)
+        importWizardDialog = dialog
+        dialog.setTitle("Import previous SMS")
+        dialog.setCancelable(true)
+        dialog.setOnDismissListener { if (importWizardDialog === dialog) importWizardDialog = null }
+
         val cal = Calendar.getInstance()
         val fromCal = Calendar.getInstance().apply {
             add(Calendar.DAY_OF_YEAR, -30)
@@ -168,268 +191,314 @@ class MainActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(40, 10, 40, 10)
+            setPadding(36, 28, 36, 28)
         }
-        val info = TextView(this).apply {
-            text = "First choose the SMS date range. Pace will then show only senders found in that range."
-            setPadding(0, 0, 0, 18)
-        }
-        root.addView(info)
+        root.addView(TextView(this).apply {
+            text = "STEP 1 OF 3\nChoose the SMS date range. Pace will then find the senders that actually have messages in this range."
+            textSize = 16f
+            setPadding(0, 0, 0, 20)
+        })
 
-        val fromButton = Button(this).apply { text = "From: ${dateFormat.format(fromCal.time)}" }
-        val toButton = Button(this).apply { text = "To: ${dateFormat.format(toCal.time)}" }
-        root.addView(fromButton)
-        root.addView(toButton)
-
-        fromButton.setOnClickListener {
+        val fromButton = makeWizardButton("FROM: ${dateFormat.format(fromCal.time)}") {
             DatePickerDialog(this, { _, y, m, d ->
                 fromCal.set(y, m, d, 0, 0, 0)
                 fromCal.set(Calendar.MILLISECOND, 0)
-                fromButton.text = "From: ${dateFormat.format(fromCal.time)}"
+                fromButton.text = "FROM: ${dateFormat.format(fromCal.time)}"
             }, fromCal.get(Calendar.YEAR), fromCal.get(Calendar.MONTH), fromCal.get(Calendar.DAY_OF_MONTH)).show()
         }
-        toButton.setOnClickListener {
+        val toButton = makeWizardButton("TO: ${dateFormat.format(toCal.time)}") {
             DatePickerDialog(this, { _, y, m, d ->
                 toCal.set(y, m, d, 23, 59, 59)
                 toCal.set(Calendar.MILLISECOND, 999)
-                toButton.text = "To: ${dateFormat.format(toCal.time)}"
+                toButton.text = "TO: ${dateFormat.format(toCal.time)}"
             }, toCal.get(Calendar.YEAR), toCal.get(Calendar.MONTH), toCal.get(Calendar.DAY_OF_MONTH)).show()
         }
+        root.addView(fromButton)
+        root.addView(toButton)
 
-        AlertDialog.Builder(this)
-            .setTitle("Choose SMS date range")
-            .setView(root)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Choose senders", null)
-            .create().also { dialog ->
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        if (fromCal.after(toCal)) {
-                            Toast.makeText(this, "From date cannot be after To date.", Toast.LENGTH_SHORT).show()
-                            return@setOnClickListener
-                        }
-                        dialog.dismiss()
-                        chooseSendersForRange(fromCal.timeInMillis, toCal.timeInMillis)
-                    }
-                }
-                dialog.show()
+        val status = TextView(this).apply {
+            text = ""
+            setPadding(0, 18, 0, 10)
+        }
+        root.addView(status)
+
+        val buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END
+        }
+        buttons.addView(makeWizardButton("CANCEL") { dialog.dismiss() })
+        buttons.addView(makeWizardButton("NEXT: FIND SENDERS") {
+            if (fromCal.after(toCal)) {
+                status.text = "From date cannot be after To date."
+                return@makeWizardButton
             }
+            chooseSendersForRange(dialog, fromCal.timeInMillis, toCal.timeInMillis)
+        })
+        root.addView(buttons)
+
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        showImportWizard(dialog, root)
+        dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.94).toInt(), WindowManager.LayoutParams.WRAP_CONTENT)
     }
 
-    private fun chooseSendersForRange(startMillis: Long, endMillis: Long) {
-        val progress = ProgressDialog(this).apply {
-            setTitle("Finding senders")
-            setMessage("Reading SMS messages for the selected date range…")
-            setCancelable(false)
+    private fun chooseSendersForRange(dialog: Dialog, startMillis: Long, endMillis: Long) {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(36, 28, 36, 28)
         }
-        progress.show()
+        val title = TextView(this).apply {
+            text = "STEP 2 OF 3\nFinding senders..."
+            textSize = 18f
+        }
+        root.addView(title)
+        val status = TextView(this).apply {
+            text = "Reading SMS inbox for:\n${formatDate(startMillis)} → ${formatDate(endMillis)}"
+            setPadding(0, 12, 0, 12)
+        }
+        root.addView(status)
+        val listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(listContainer)
+        val scroll = ScrollView(this).apply { addView(listContainer) }
+        root.removeView(listContainer)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END
+        }
+        val back = makeWizardButton("BACK") { chooseImportDateRange() }
+        val next = makeWizardButton("NEXT: FIND MESSAGES") { }
+        next.isEnabled = false
+        bottom.addView(back)
+        bottom.addView(next)
+        root.addView(bottom)
+
+        showImportWizard(dialog, root)
+        dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.94).toInt(), (resources.displayMetrics.heightPixels * 0.88).toInt())
 
         smsExecutor.execute {
-            val senders = mutableListOf<String>()
-            val senderCounts = linkedMapOf<String, Int>()
-            var errorMessage: String? = null
+            val counts = linkedMapOf<String, Int>()
+            var queryError: String? = null
             try {
-                val selection = "date >= ? AND date <= ?"
-                val args = arrayOf(startMillis.toString(), endMillis.toString())
-                contentResolver.query(
-                    Telephony.Sms.Inbox.CONTENT_URI,
-                    arrayOf("address"),
-                    selection,
-                    args,
-                    "date DESC"
-                )?.use { c ->
-                    while (c.moveToNext()) {
-                        val s = c.getString(0) ?: ""
-                        if (s.isNotBlank()) {
-                            if (!senderCounts.containsKey(s)) senders.add(s)
-                            senderCounts[s] = (senderCounts[s] ?: 0) + 1
+                val projection = arrayOf("address")
+                val selection = "date >= ? AND date <= ? AND type = ?"
+                val args = arrayOf(startMillis.toString(), endMillis.toString(), "1")
+                contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, projection, selection, args, "date DESC")?.use { cursor ->
+                    val addressIndex = cursor.getColumnIndex("address")
+                    while (cursor.moveToNext()) {
+                        val address = if (addressIndex >= 0) cursor.getString(addressIndex).orEmpty().trim() else ""
+                        if (address.isNotEmpty()) counts[address] = (counts[address] ?: 0) + 1
+                    }
+                }
+            } catch (e: SecurityException) {
+                queryError = "Android denied SMS access: ${e.message ?: "permission denied"}"
+            } catch (e: Exception) {
+                queryError = "SMS query failed: ${e.javaClass.simpleName}: ${e.message ?: "unknown error"}"
+            }
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed || importWizardDialog !== dialog) return@runOnUiThread
+                listContainer.removeAllViews()
+                if (queryError != null) {
+                    title.text = "STEP 2 OF 3\nSMS access error"
+                    status.text = queryError
+                    next.isEnabled = false
+                    return@runOnUiThread
+                }
+                if (counts.isEmpty()) {
+                    title.text = "STEP 2 OF 3\nNo senders found"
+                    status.text = "No inbox SMS were found between ${formatDate(startMillis)} and ${formatDate(endMillis)}.\n\nTry a wider date range and make sure the messages are present in the phone's SMS app."
+                    next.isEnabled = false
+                    return@runOnUiThread
+                }
+
+                title.text = "STEP 2 OF 3\nSelect senders"
+                status.text = "${counts.values.sum()} SMS found from ${counts.size} senders. Select the bank/payment senders you want to import."
+                val selected = mutableSetOf<String>()
+
+                val selectAll = CheckBox(this).apply { text = "Select all senders" }
+                listContainer.addView(selectAll)
+                val boxes = mutableListOf<Pair<String, CheckBox>>()
+                counts.entries.sortedByDescending { it.value }.forEach { entry ->
+                    val cb = CheckBox(this).apply {
+                        text = "${entry.key}  (${entry.value} messages)"
+                        setPadding(0, 8, 0, 8)
+                    }
+                    boxes.add(entry.key to cb)
+                    cb.setOnCheckedChangeListener { _, checked ->
+                        if (checked) selected.add(entry.key) else selected.remove(entry.key)
+                        next.isEnabled = selected.isNotEmpty()
+                        if (!checked) selectAll.isChecked = false
+                    }
+                    listContainer.addView(cb)
+                }
+                selectAll.setOnCheckedChangeListener { _, checked ->
+                    boxes.forEach { (_, cb) -> cb.isChecked = checked }
+                    if (checked) selected.addAll(counts.keys) else selected.clear()
+                    next.isEnabled = selected.isNotEmpty()
+                }
+                next.setOnClickListener {
+                    val chosen = selected.toList()
+                    if (chosen.isEmpty()) return@setOnClickListener
+                    chooseMessages(dialog, chosen, startMillis, endMillis)
+                }
+                next.isEnabled = false
+            }
+        }
+    }
+
+    private fun formatDate(millis: Long): String = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(millis))
+
+    private data class SmsRow(val id: Long, val address: String, val body: String, val date: Long)
+
+    private fun chooseMessages(dialog: Dialog, selectedSenders: List<String>, startMillis: Long, endMillis: Long) {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(28, 24, 28, 24)
+        }
+        val title = TextView(this).apply {
+            text = "STEP 3 OF 3\nSelect messages"
+            textSize = 18f
+        }
+        root.addView(title)
+        val status = TextView(this).apply {
+            text = "Loading messages..."
+            setPadding(0, 10, 0, 10)
+        }
+        root.addView(status)
+        val scroll = ScrollView(this)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(list)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END
+        }
+        bottom.addView(makeWizardButton("BACK") { chooseSendersForRange(dialog, startMillis, endMillis) })
+        val importButton = makeWizardButton("IMPORT SELECTED") { }
+        importButton.isEnabled = false
+        bottom.addView(importButton)
+        root.addView(bottom)
+        showImportWizard(dialog, root)
+        dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.94).toInt(), (resources.displayMetrics.heightPixels * 0.88).toInt())
+
+        smsExecutor.execute {
+            val rows = mutableListOf<SmsRow>()
+            var error: String? = null
+            try {
+                val projection = arrayOf("_id", "address", "body", "date")
+                val selection = "date >= ? AND date <= ? AND type = ?"
+                val args = arrayOf(startMillis.toString(), endMillis.toString(), "1")
+                contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, projection, selection, args, "date DESC")?.use { c ->
+                    val idIdx = c.getColumnIndex("_id")
+                    val addressIdx = c.getColumnIndex("address")
+                    val bodyIdx = c.getColumnIndex("body")
+                    val dateIdx = c.getColumnIndex("date")
+                    while (c.moveToNext() && rows.size < 5000) {
+                        val address = c.getString(addressIdx).orEmpty()
+                        if (selectedSenders.contains(address)) {
+                            rows.add(SmsRow(c.getLong(idIdx), address, c.getString(bodyIdx).orEmpty(), c.getLong(dateIdx)))
                         }
                     }
                 }
             } catch (e: SecurityException) {
-                errorMessage = "SMS access is not available to Pace. Android reports: ${e.message ?: "permission denied"}"
+                error = "Android denied SMS access: ${e.message ?: "permission denied"}"
             } catch (e: Exception) {
-                errorMessage = "Could not read SMS: ${e.javaClass.simpleName}: ${e.message ?: "unknown error"}"
+                error = "SMS query failed: ${e.javaClass.simpleName}: ${e.message ?: "unknown error"}"
             }
 
             runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                progress.dismiss()
-                if (errorMessage != null) {
-                    AlertDialog.Builder(this)
-                        .setTitle("SMS read error")
-                        .setMessage(errorMessage)
-                        .setPositiveButton("OK", null)
-                        .show()
+                if (isFinishing || isDestroyed || importWizardDialog !== dialog) return@runOnUiThread
+                list.removeAllViews()
+                if (error != null) {
+                    status.text = error
                     return@runOnUiThread
                 }
-                if (senders.isEmpty()) {
-                    AlertDialog.Builder(this)
-                        .setTitle("No SMS found")
-                        .setMessage("Pace successfully queried the SMS inbox, but no messages were found between ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(startMillis))} and ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(endMillis))}.\n\nCheck that the messages are actually in the phone's SMS inbox and that the selected dates are correct.")
-                        .setPositiveButton("OK", null)
-                        .show()
+                if (rows.isEmpty()) {
+                    status.text = "No messages were found for the selected senders in this date range."
                     return@runOnUiThread
                 }
 
-                val labels = senders.map { "$it  (${senderCounts[it]} messages)" }.toTypedArray()
-                val checked = BooleanArray(senders.size)
-                AlertDialog.Builder(this)
-                    .setTitle("Choose senders in date range")
-                    .setMessage("Only senders with SMS in the selected date range are shown.")
-                    .setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
-                    .setNegativeButton("Back") { _, _ -> chooseImportDateRange() }
-                    .setPositiveButton("Find messages") { _, _ ->
-                        val selected = senders.filterIndexed { i, _ -> checked[i] }
-                        if (selected.isEmpty()) {
-                            Toast.makeText(this, "Select at least one sender.", Toast.LENGTH_SHORT).show()
-                            return@setPositiveButton
+                val groups = linkedMapOf<String, MutableList<SmsRow>>()
+                val keyFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                val displayFormat = SimpleDateFormat("dd MMM yyyy", Locale.US)
+                rows.sortedByDescending { it.date }.forEach { row ->
+                    groups.getOrPut(keyFormat.format(Date(row.date))) { mutableListOf() }.add(row)
+                }
+                status.text = "${rows.size} messages across ${groups.size} days. Select individual messages or an entire day."
+                val allChecks = mutableListOf<CheckBox>()
+                val dayChecks = mutableListOf<Pair<CheckBox, List<CheckBox>>>()
+                var updating = false
+
+                val all = CheckBox(this).apply { text = "SELECT ALL ${rows.size} MESSAGES" }
+                list.addView(all)
+                groups.forEach { (_, dayRows) ->
+                    val dayHeader = CheckBox(this).apply { text = "${displayFormat.format(Date(dayRows.first().date))} — SELECT ALL (${dayRows.size})" }
+                    list.addView(dayHeader)
+                    val children = mutableListOf<CheckBox>()
+                    dayRows.forEach { row ->
+                        val time = SimpleDateFormat("HH:mm", Locale.US).format(Date(row.date))
+                        val body = row.body.replace("\n", " ").replace("\r", " ").take(220)
+                        val cb = CheckBox(this).apply {
+                            text = "$time · ${row.address}\n$body"
+                            setPadding(10, 5, 0, 8)
                         }
-                        chooseMessages(selected, startMillis, endMillis)
-                    }.show()
-            }
-        }
-    }
-
-    private data class SmsRow(val id: Long, val address: String, val body: String, val date: Long)
-
-    private data class SmsDateGroup(
-        val dateKey: String,
-        val rows: MutableList<SmsRow>,
-        val header: CheckBox,
-        val children: MutableList<CheckBox>
-    )
-
-    private fun chooseMessages(selectedSenders: List<String>, startMillis: Long, endMillis: Long) {
-        val rows = mutableListOf<SmsRow>()
-        val projection = arrayOf("_id", "address", "body", "date")
-        val cursor = contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, projection, "date >= ? AND date <= ?", arrayOf(startMillis.toString(), endMillis.toString()), "date DESC")
-        cursor?.use { c ->
-            val idxId = c.getColumnIndex("_id")
-            val idxAddress = c.getColumnIndex("address")
-            val idxBody = c.getColumnIndex("body")
-            val idxDate = c.getColumnIndex("date")
-            while (c.moveToNext() && rows.size < 3000) {
-                val address = c.getString(idxAddress) ?: ""
-                if (!selectedSenders.contains(address)) continue
-                rows.add(SmsRow(c.getLong(idxId), address, c.getString(idxBody) ?: "", c.getLong(idxDate)))
-            }
-        }
-        if (rows.isEmpty()) {
-            Toast.makeText(this, "No messages found for the selected senders.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        // Group the inbox by calendar date so a whole day can be selected at once.
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        val displayFormat = SimpleDateFormat("dd MMM yyyy", Locale.US)
-        val groups = linkedMapOf<String, MutableList<SmsRow>>()
-        rows.sortedByDescending { it.date }.forEach { row ->
-            val key = dateFormat.format(Date(row.date))
-            groups.getOrPut(key) { mutableListOf() }.add(row)
-        }
-
-        val scroll = ScrollView(this)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(28, 12, 28, 12)
-        }
-        scroll.addView(root)
-
-        val summary = TextView(this).apply {
-            text = "${rows.size} messages across ${groups.size} dates. Select individual messages or use Select all for a date."
-            setPadding(0, 0, 0, 16)
-        }
-        root.addView(summary)
-
-        val selectAll = CheckBox(this).apply {
-            text = "Select all messages"
-            setPadding(0, 0, 0, 10)
-        }
-        root.addView(selectAll)
-
-        val groupStates = mutableListOf<SmsDateGroup>()
-        var bulkUpdating = false
-
-        groups.forEach { (dateKey, dateRows) ->
-            val header = CheckBox(this).apply {
-                text = "${displayFormat.format(Date(dateRows.first().date))} (${dateRows.size}) — Select all"
-                setPadding(0, 12, 0, 6)
-            }
-            root.addView(header)
-
-            val children = mutableListOf<CheckBox>()
-            val state = SmsDateGroup(dateKey, dateRows, header, children)
-            groupStates.add(state)
-
-            header.setOnCheckedChangeListener { _, checked ->
-                if (bulkUpdating) return@setOnCheckedChangeListener
-                bulkUpdating = true
-                children.forEach { it.isChecked = checked }
-                bulkUpdating = false
-            }
-
-            dateRows.forEach { row ->
-                val messageDate = SimpleDateFormat("HH:mm", Locale.US).format(Date(row.date))
-                val label = "${messageDate}  ·  ${row.address}\n${row.body.replace("\\n", " ").replace("\\r", " ").take(180)}"
-                val cb = CheckBox(this).apply {
-                    text = label
-                    setPadding(8, 6, 0, 10)
-                }
-                children.add(cb)
-                root.addView(cb)
-                cb.setOnCheckedChangeListener { _, _ ->
-                    if (bulkUpdating) return@setOnCheckedChangeListener
-                    val all = children.isNotEmpty() && children.all { it.isChecked }
-                    val none = children.none { it.isChecked }
-                    bulkUpdating = true
-                    header.isChecked = all
-                    if (none) header.isChecked = false
-                    bulkUpdating = false
-                }
-            }
-        }
-
-        selectAll.setOnCheckedChangeListener { _, checked ->
-            bulkUpdating = true
-            groupStates.forEach { group ->
-                group.header.isChecked = checked
-                group.children.forEach { it.isChecked = checked }
-            }
-            bulkUpdating = false
-        }
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Select messages by date")
-            .setView(scroll)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Extract selected", null)
-            .create()
-
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val selectedRows = mutableListOf<SmsRow>()
-                groupStates.forEach { group ->
-                    group.children.forEachIndexed { index, checkBox ->
-                        if (checkBox.isChecked) selectedRows.add(group.rows[index])
+                        children.add(cb)
+                        allChecks.add(cb)
+                        list.addView(cb)
+                        cb.setOnCheckedChangeListener { _, _ ->
+                            if (updating) return@setOnCheckedChangeListener
+                            val allDay = children.isNotEmpty() && children.all { it.isChecked }
+                            updating = true
+                            dayHeader.isChecked = allDay
+                            all.isChecked = allChecks.isNotEmpty() && allChecks.all { it.isChecked }
+                            updating = false
+                            importButton.isEnabled = allChecks.any { it.isChecked }
+                        }
+                    }
+                    dayChecks.add(dayHeader to children)
+                    dayHeader.setOnCheckedChangeListener { _, checked ->
+                        if (updating) return@setOnCheckedChangeListener
+                        updating = true
+                        children.forEach { it.isChecked = checked }
+                        all.isChecked = allChecks.isNotEmpty() && allChecks.all { it.isChecked }
+                        updating = false
+                        importButton.isEnabled = allChecks.any { it.isChecked }
                     }
                 }
-                if (selectedRows.isEmpty()) {
-                    Toast.makeText(this, "Select at least one message or date.", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
+                all.setOnCheckedChangeListener { _, checked ->
+                    if (updating) return@setOnCheckedChangeListener
+                    updating = true
+                    dayChecks.forEach { (header, children) ->
+                        header.isChecked = checked
+                        children.forEach { it.isChecked = checked }
+                    }
+                    updating = false
+                    importButton.isEnabled = checked
                 }
-
-                var count = 0
-                selectedRows.forEach { row ->
-                    val result = TransactionParser.parse(this, "HISTORICAL_SMS", row.address, row.body, row.date) ?: return@forEach
-                    addToWeb(result.tx)
-                    count++
+                importButton.setOnClickListener {
+                    val selectedRows = mutableListOf<SmsRow>()
+                    var index = 0
+                    groups.forEach { (_, dayRows) ->
+                        dayRows.forEach { row ->
+                            if (allChecks[index].isChecked) selectedRows.add(row)
+                            index++
+                        }
+                    }
+                    var imported = 0
+                    selectedRows.forEach { row ->
+                        val result = TransactionParser.parse(this, "HISTORICAL_SMS", row.address, row.body, row.date)
+                        if (result != null) {
+                            addToWeb(result.tx)
+                            imported++
+                        }
+                    }
+                    dialog.dismiss()
+                    Toast.makeText(this, "Imported $imported matching transactions from ${selectedRows.size} selected SMS.", Toast.LENGTH_LONG).show()
                 }
-                dialog.dismiss()
-                Toast.makeText(this, "Imported $count matching transactions. You can edit them anytime.", Toast.LENGTH_LONG).show()
+                importButton.isEnabled = false
             }
         }
-        dialog.show()
     }
 
     inner class NativeBridge(private val a: MainActivity) {
