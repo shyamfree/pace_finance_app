@@ -46,3 +46,7 @@ GitHub Actions produces:
 
 - `pace-debug-apk`
 - `pace-release-apk`
+
+
+## Historical SMS sender diagnostics
+The sender lookup runs off the Android UI thread. The app shows a progress dialog while reading the SMS provider and displays a specific error if Android denies the query or if no messages exist in the selected date range.

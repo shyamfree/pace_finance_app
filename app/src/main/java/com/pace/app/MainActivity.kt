@@ -17,10 +17,12 @@ import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private val smsReq = 4101
+    private val smsExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -149,8 +151,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun chooseImportDateRange() {
         val cal = Calendar.getInstance()
-        val fromCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -30) }
-        val toCal = Calendar.getInstance()
+        val fromCal = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, -30)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val toCal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }
         val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.US)
 
         val root = LinearLayout(this).apply {
@@ -204,46 +217,80 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun chooseSendersForRange(startMillis: Long, endMillis: Long) {
-        val senders = mutableListOf<String>()
-        val senderCounts = linkedMapOf<String, Int>()
-        val selection = "date >= ? AND date <= ?"
-        val args = arrayOf(startMillis.toString(), endMillis.toString())
-        val senderCursor = contentResolver.query(
-            Telephony.Sms.Inbox.CONTENT_URI,
-            arrayOf("address"),
-            selection,
-            args,
-            "date DESC"
-        )
-        senderCursor?.use { c ->
-            while (c.moveToNext()) {
-                val s = c.getString(0) ?: ""
-                if (s.isNotBlank()) {
-                    if (!senderCounts.containsKey(s)) senders.add(s)
-                    senderCounts[s] = (senderCounts[s] ?: 0) + 1
+        val progress = ProgressDialog(this).apply {
+            setTitle("Finding senders")
+            setMessage("Reading SMS messages for the selected date range…")
+            setCancelable(false)
+        }
+        progress.show()
+
+        smsExecutor.execute {
+            val senders = mutableListOf<String>()
+            val senderCounts = linkedMapOf<String, Int>()
+            var errorMessage: String? = null
+            try {
+                val selection = "date >= ? AND date <= ?"
+                val args = arrayOf(startMillis.toString(), endMillis.toString())
+                contentResolver.query(
+                    Telephony.Sms.Inbox.CONTENT_URI,
+                    arrayOf("address"),
+                    selection,
+                    args,
+                    "date DESC"
+                )?.use { c ->
+                    while (c.moveToNext()) {
+                        val s = c.getString(0) ?: ""
+                        if (s.isNotBlank()) {
+                            if (!senderCounts.containsKey(s)) senders.add(s)
+                            senderCounts[s] = (senderCounts[s] ?: 0) + 1
+                        }
+                    }
                 }
+            } catch (e: SecurityException) {
+                errorMessage = "SMS access is not available to Pace. Android reports: ${e.message ?: "permission denied"}"
+            } catch (e: Exception) {
+                errorMessage = "Could not read SMS: ${e.javaClass.simpleName}: ${e.message ?: "unknown error"}"
+            }
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                if (errorMessage != null) {
+                    AlertDialog.Builder(this)
+                        .setTitle("SMS read error")
+                        .setMessage(errorMessage)
+                        .setPositiveButton("OK", null)
+                        .show()
+                    return@runOnUiThread
+                }
+                if (senders.isEmpty()) {
+                    AlertDialog.Builder(this)
+                        .setTitle("No SMS found")
+                        .setMessage("Pace successfully queried the SMS inbox, but no messages were found between ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(startMillis))} and ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(endMillis))}.
+
+Check that the messages are actually in the phone's SMS inbox and that the selected dates are correct.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                    return@runOnUiThread
+                }
+
+                val labels = senders.map { "$it  (${senderCounts[it]} messages)" }.toTypedArray()
+                val checked = BooleanArray(senders.size)
+                AlertDialog.Builder(this)
+                    .setTitle("Choose senders in date range")
+                    .setMessage("Only senders with SMS in the selected date range are shown.")
+                    .setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
+                    .setNegativeButton("Back") { _, _ -> chooseImportDateRange() }
+                    .setPositiveButton("Find messages") { _, _ ->
+                        val selected = senders.filterIndexed { i, _ -> checked[i] }
+                        if (selected.isEmpty()) {
+                            Toast.makeText(this, "Select at least one sender.", Toast.LENGTH_SHORT).show()
+                            return@setPositiveButton
+                        }
+                        chooseMessages(selected, startMillis, endMillis)
+                    }.show()
             }
         }
-        if (senders.isEmpty()) {
-            Toast.makeText(this, "No SMS messages found in the selected date range.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val labels = senders.map { "$it  (${senderCounts[it]} messages)" }.toTypedArray()
-        val checked = BooleanArray(senders.size)
-        AlertDialog.Builder(this)
-            .setTitle("Choose senders in date range")
-            .setMessage("Only senders with SMS in the selected date range are shown.")
-            .setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
-            .setNegativeButton("Back") { _, _ -> chooseImportDateRange() }
-            .setPositiveButton("Find messages") { _, _ ->
-                val selected = senders.filterIndexed { i, _ -> checked[i] }
-                if (selected.isEmpty()) {
-                    Toast.makeText(this, "Select at least one sender.", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                chooseMessages(selected, startMillis, endMillis)
-            }.show()
     }
 
     private data class SmsRow(val id: Long, val address: String, val body: String, val date: Long)
