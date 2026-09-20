@@ -1,48 +1,39 @@
-# Pace APK updates — one-time signing setup
+# Pace APK signing — one-time setup
 
-Pace now uses `versionCode 4` / `versionName 4.0.0` and a persistent signing key in GitHub Actions.
+The previous build failed because GitHub Actions could not find `PACE_KEYSTORE_BASE64`.
+This is a signing configuration issue, not an Android/Kotlin compilation error.
 
-Why this is needed:
-- Android only allows an update when the package signature matches the installed app and the versionCode increases.
-- Older Pace builds used the default GitHub runner debug signing and also reused the same versionCode.
-- This workflow uses one persistent keystore stored as GitHub Actions secrets.
-
-## One-time setup from Termux
-
-Run these commands in a safe directory, not inside the Git repository:
+Run this once in Termux:
 
 ```bash
 cd ~
-mkdir -p pace-signing
+rm -rf pace-signing
+mkdir -p ~/pace-signing
 cd ~/pace-signing
 read -s -p "Enter a strong Pace signing password: " PACE_PASSWORD; echo
 keytool -genkeypair -v -keystore pace-signing.jks -alias pace -keyalg RSA -keysize 2048 -validity 10000 -storepass "$PACE_PASSWORD" -keypass "$PACE_PASSWORD" -dname "CN=Pace Finance, OU=Pace, O=Pace, L=Local, ST=Local, C=IN"
 base64 -w 0 pace-signing.jks > pace-signing.base64
-printf '\nKeystore created: %s\n' "$PWD/pace-signing.jks"
-printf 'Alias: pace\n'
-printf 'Base64 file: %s\n' "$PWD/pace-signing.base64"
 ```
 
-Keep the password private. Do not commit `pace-signing.jks` or `pace-signing.base64` to GitHub.
+Do **not** put either file in the Git repository.
 
-## Add four GitHub Actions secrets
+Then open:
 
-Open the repository on GitHub:
-`Settings -> Secrets and variables -> Actions -> New repository secret`
+GitHub → `shyamfree/pace_finance_app` → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
 
-Create:
+Create these four secrets:
 
-1. `PACE_KEYSTORE_BASE64`
-   - Copy the entire one-line contents of `~/pace-signing/pace-signing.base64`
-2. `PACE_KEYSTORE_PASSWORD`
-   - The password you entered above
-3. `PACE_KEY_ALIAS`
-   - `pace`
-4. `PACE_KEY_PASSWORD`
-   - The same password you entered above
+| Secret | Value |
+|---|---|
+| `PACE_KEYSTORE_BASE64` | Entire contents of `~/pace-signing/pace-signing.base64` |
+| `PACE_KEYSTORE_PASSWORD` | The password entered above |
+| `PACE_KEY_ALIAS` | `pace` |
+| `PACE_KEY_PASSWORD` | The same password |
 
-After these are added, every Pace APK from the workflow is signed with the same key.
+After saving all four, rerun **Build Pace Android APK**.
 
-## Important first update
+## Important
 
-If the currently installed Pace APK was signed with a different key, Android will not allow the first v4 update over it. In that case uninstall the old Pace APK once, install the new v4 APK, and then future Pace APK updates will install normally as long as the versionCode keeps increasing.
+The signing key must remain the same for future Pace APK updates. Keep a secure backup of `pace-signing.jks` and its password.
+
+If an already-installed Pace APK was signed with a different key, the first APK signed with this new persistent key may require uninstalling the old APK once. After that, future builds can update it normally as long as `versionCode` keeps increasing.

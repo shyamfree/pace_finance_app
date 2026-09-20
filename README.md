@@ -1,28 +1,48 @@
-# Pace Android v4
+# Pace Android v6
 
-Pace is the Android version of the finance PWA with native SMS and notification transaction import.
+Pace is the Android finance app with native SMS and payment-notification transaction detection.
 
-## v4 changes
+## Historical SMS import — v6
 
-- Historical SMS import grouped by calendar date.
-- Each date has its own **Select all** checkbox.
-- A global **Select all messages** option is also available.
-- Individual SMS messages can still be selected/deselected.
-- Up to 3000 selected-sender SMS messages are grouped by date for review.
-- Transaction parser preserves the original SMS transaction date when one is present.
-- Fixed the Kotlin `Matcher.groups.getOrNull()` compilation error.
-- `versionCode` increased to 4 and `versionName` to 4.0.0.
-- GitHub Actions now uses a persistent signing key so later APKs can update an installed Pace APK.
-- Live transaction notifications remain review-first: they are not automatically added.
+The historical import flow is now:
 
-## GitHub Actions signing setup
+1. Choose a **From** date and **To** date.
+2. Pace scans only SMS messages inside that date range.
+3. Pace shows only **senders that have messages in that range**, with message counts.
+4. Select one or more senders.
+5. Pace groups the matching messages by their **actual SMS calendar date**.
+6. Use **Select all** for an individual day, select individual messages, or select all messages.
+7. Extract/import only the selected messages.
 
-Read `SIGNING_SETUP.md` once and add the four repository secrets before running the workflow.
+The SMS received timestamp and the transaction date extracted from the SMS are kept separate.
 
-## Build
+## Other behavior
 
-The workflow builds:
-- `pace-debug-apk` -> signed `app-debug.apk`
-- `pace-release-apk` -> signed `app-release.apk`
+- Live SMS/payment notifications stay pending until the user explicitly chooses Add or Ignore.
+- Duplicate protection is applied to historical and live imports.
+- Imported transactions remain in Pace even if the original SMS is later deleted.
+- Imported transaction fields remain editable.
+- Bank sender/rule configuration is available from Import settings.
+- `versionCode` is 5 and `versionName` is 5.0.0.
 
-The signing key is never stored in the repository. GitHub Actions reconstructs it from repository secrets.
+## GitHub Actions signing
+
+The workflow intentionally requires a persistent signing key. This is necessary for APK updates: Android will reject an update signed with a different key.
+
+The workflow uses these repository secrets:
+
+- `PACE_KEYSTORE_BASE64`
+- `PACE_KEYSTORE_PASSWORD`
+- `PACE_KEY_ALIAS`
+- `PACE_KEY_PASSWORD`
+
+See `SIGNING_SETUP.md` for the one-time setup.
+
+Do not commit the `.jks` file or its base64 contents to the repository.
+
+## Build artifacts
+
+GitHub Actions produces:
+
+- `pace-debug-apk`
+- `pace-release-apk`

@@ -32,13 +32,23 @@ jobs:
       - name: Prepare stable signing key
         env:
           PACE_KEYSTORE_BASE64: ${{ secrets.PACE_KEYSTORE_BASE64 }}
+          PACE_KEYSTORE_PASSWORD: ${{ secrets.PACE_KEYSTORE_PASSWORD }}
+          PACE_KEY_ALIAS: ${{ secrets.PACE_KEY_ALIAS }}
+          PACE_KEY_PASSWORD: ${{ secrets.PACE_KEY_PASSWORD }}
         run: |
-          if [ -z "$PACE_KEYSTORE_BASE64" ]; then
-            echo "ERROR: GitHub secret PACE_KEYSTORE_BASE64 is missing."
-            echo "Create the four Pace signing secrets described in README.md, then rerun the workflow."
+          missing=0
+          for name in PACE_KEYSTORE_BASE64 PACE_KEYSTORE_PASSWORD PACE_KEY_ALIAS PACE_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "ERROR: GitHub Actions secret $name is missing."
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Add all four Pace signing secrets from SIGNING_SETUP.md, then rerun the workflow."
             exit 1
           fi
           echo "$PACE_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/pace-signing.jks"
+          test -s "$GITHUB_WORKSPACE/pace-signing.jks"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
