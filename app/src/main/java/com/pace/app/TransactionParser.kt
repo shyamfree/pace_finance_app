@@ -23,9 +23,10 @@ object TransactionParser {
         val amount = extractAmount(body, matchedRule?.optString("regex")) ?: return null
         val lower = body.lowercase(Locale.US)
         val type = classifyType(lower)
-        val merchant = extractMerchant(body, type)
+        val merchant = extractMerchant(body, type, matchedRule)
         val upiRef = extractUpiReference(body)
         val date = extractDate(body) ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(timestampMillis))
+        val time = extractTime(body) ?: SimpleDateFormat("HH:mm", Locale.US).format(Date(timestampMillis))
         val fp = TransactionStore.transactionFingerprint(type, amount, merchant, upiRef, date, sender ?: "", body)
         if (TransactionStore.isIgnored(context, fp)) return null
 
@@ -36,7 +37,8 @@ object TransactionParser {
             .put("amount", amount)
             .put("category", category)
             .put("date", date)
-            .put("note", merchant.ifBlank { body.take(80) })
+            .put("time", time)
+            .put("note", "")
             .put("merchant", merchant)
             .put("upiReference", upiRef)
             .put("source", source)
@@ -47,17 +49,22 @@ object TransactionParser {
     }
 
     private fun findMatchingRule(rules: org.json.JSONArray, sender: String?, body: String): JSONObject? {
-        for (i in 0 until rules.length()) {
-            val r = rules.optJSONObject(i) ?: continue
-            if (!r.optBoolean("enabled", true)) continue
-            val senderNeed = r.optString("sender").trim()
-            if (senderNeed.isNotEmpty() && !(senderNeed.equals("bank", true) || (sender ?: "").contains(senderNeed, true))) continue
-            val pattern = r.optString("regex")
-            if (pattern.isNotBlank()) {
-                try { if (Regex(pattern).containsMatchIn(body)) return r } catch (_: Exception) { }
+        // Sender-specific rules must win over the generic bank rule.
+        for (pass in 0..1) {
+            for (i in 0 until rules.length()) {
+                val r = rules.optJSONObject(i) ?: continue
+                if (!r.optBoolean("enabled", true)) continue
+                val senderNeed = r.optString("sender").trim()
+                if (pass == 0 && senderNeed.isEmpty()) continue
+                if (pass == 1 && senderNeed.isNotEmpty()) continue
+                if (senderNeed.isNotEmpty() && !(senderNeed.equals("bank", true) || (sender ?: "").contains(senderNeed, true))) continue
+                val pattern = r.optString("regex")
+                if (pattern.isNotBlank()) {
+                    try { if (Regex(pattern).containsMatchIn(body)) return r } catch (_: Exception) { }
+                }
             }
         }
-        return if (rules.length() == 0) null else if (looksLikeTransaction(body)) JSONObject().put("name", "Built-in transaction detection") else null
+        return if (looksLikeTransaction(body)) JSONObject().put("name", "Built-in transaction detection") else null
     }
 
     private fun looksLikeTransaction(body: String): Boolean {
@@ -97,16 +104,37 @@ object TransactionParser {
         }
     }
 
-    private fun extractMerchant(body: String, type: String): String {
+    private fun extractMerchant(body: String, type: String, rule: JSONObject?): String {
+        val mode = rule?.optString("merchantMode", "")?.trim().orEmpty()
+        if (mode == "before_credited") {
+            Regex("""(?i)(?:^|[;,\-])\s*([A-Za-z][A-Za-z0-9 .&_'@-]{1,60}?)\s+credited\b""")
+                .find(body)?.groupValues?.getOrNull(1)?.trim()?.trim('.', ';', ',')?.let { if (it.length >= 2) return it }
+        }
+        if (mode == "after_to") {
+            Regex("""(?i)\bto\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\s+(?:on|via|using|ref|txn|upi)\b|[.;,]|$)""")
+                .find(body)?.groupValues?.getOrNull(1)?.trim()?.trim('.', ';', ',')?.let { if (it.length >= 2) return it }
+        }
+        if (mode == "after_from") {
+            Regex("""(?i)\bfrom\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\s+(?:on|via|ref|txn|upi)\b|[.;,]|$)""")
+                .find(body)?.groupValues?.getOrNull(1)?.trim()?.trim('.', ';', ',')?.let { if (it.length >= 2) return it }
+        }
+        if (mode == "custom") {
+            val custom = rule?.optString("merchantRegex").orEmpty()
+            if (custom.isNotBlank()) {
+                try {
+                    Regex(custom).find(body)?.groupValues?.getOrNull(1)?.trim()?.let { if (it.length >= 2) return it }
+                } catch (_: Exception) { }
+            }
+        }
         val patterns = if (type == "expense") listOf(
-            Regex("(?i)\\bto\\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\\s+(?:on|via|using|ref|txn|upi)\\b|[.;,]|$)"),
-            Regex("(?i)\\bmerchant\\s*[:=-]?\\s*([A-Za-z0-9@._&' -]{2,60})"),
-            Regex("(?i)\\b(?:at|for)\\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\\s+(?:on|via|ref|txn|upi)\\b|[.;,]|$)"),
-            Regex("(?i)\\b(?:towards|to VPA)\\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\\s+(?:on|via|ref|txn|upi)\\b|[.;,]|$)"),
-            Regex("(?i)[;,\\-]\\s*([A-Za-z][A-Za-z0-9 .&_-]{1,50}?)\\s+credited\\b")
+            Regex("""(?i)\bto\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\s+(?:on|via|using|ref|txn|upi)\b|[.;,]|$)"""),
+            Regex("""(?i)\bmerchant\s*[:=-]?\s*([A-Za-z0-9@._&' -]{2,60})"""),
+            Regex("""(?i)\b(?:at|for)\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\s+(?:on|via|ref|txn|upi)\b|[.;,]|$)"""),
+            Regex("""(?i)\b(?:towards|to VPA)\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\s+(?:on|via|ref|txn|upi)\b|[.;,]|$)"""),
+            Regex("""(?i)[;,\-]\s*([A-Za-z][A-Za-z0-9 .&_-]{1,50}?)\s+credited\b""")
         ) else listOf(
-            Regex("(?i)\\bfrom\\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\\s+(?:on|via|ref|txn|upi)\\b|[.;,]|$)"),
-            Regex("(?i)\\b(?:salary|refund|cashback)\\s+(?:from|by)\\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\\s+(?:on|via|ref|txn|upi)\\b|[.;,]|$)")
+            Regex("""(?i)\bfrom\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\s+(?:on|via|ref|txn|upi)\b|[.;,]|$)"""),
+            Regex("""(?i)\b(?:salary|refund|cashback)\s+(?:from|by)\s+([A-Za-z0-9@._&' -]{2,60}?)(?=\s+(?:on|via|ref|txn|upi)\b|[.;,]|$)""")
         )
         for (p in patterns) {
             val m = p.find(body) ?: continue
@@ -123,6 +151,22 @@ object TransactionParser {
         )
         for (p in patterns) p.find(body)?.groupValues?.getOrNull(1)?.let { return it }
         return ""
+    }
+
+    private fun extractTime(body: String): String? {
+        val r = Regex("""(?i)\b([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)\s*(AM|PM)?\b""")
+        val m = r.find(body) ?: return null
+        val raw = m.groupValues.getOrNull(1) ?: return null
+        val ampm = m.groupValues.getOrNull(2).orEmpty()
+        val candidates = if (ampm.isNotBlank()) listOf("h:mm a", "H:mm", "H:mm:ss") else listOf("H:mm", "H:mm:ss")
+        val input = if (ampm.isNotBlank()) "$raw $ampm" else raw
+        for (fmt in candidates) {
+            try {
+                val d = SimpleDateFormat(fmt, Locale.US).apply { isLenient = false }.parse(input) ?: continue
+                return SimpleDateFormat("HH:mm", Locale.US).format(d)
+            } catch (_: Exception) { }
+        }
+        return null
     }
 
     private fun extractDate(body: String): String? {

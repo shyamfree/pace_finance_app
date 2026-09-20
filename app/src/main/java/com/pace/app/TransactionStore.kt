@@ -11,6 +11,7 @@ object TransactionStore {
     private const val PENDING = "pending"
     private const val IGNORED = "ignored"
     private const val RULES = "rules"
+    private const val CATEGORIES = "categories"
 
     fun prefs(c: Context) = c.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
@@ -83,6 +84,14 @@ object TransactionStore {
     }
 
     fun saveRules(c: Context, a: JSONArray) { prefs(c).edit().putString(RULES, a.toString()).apply() }
+
+    fun saveCategories(c: Context, categories: JSONObject) {
+        prefs(c).edit().putString(CATEGORIES, categories.toString()).apply()
+    }
+
+    fun categories(c: Context): JSONObject {
+        return try { JSONObject(prefs(c).getString(CATEGORIES, "{}")) } catch (_: Exception) { JSONObject() }
+    }
     fun ignored(c: Context, fp: String) { val a = JSONArray(prefs(c).getString(IGNORED, "[]")); a.put(fp); prefs(c).edit().putString(IGNORED, a.toString()).apply() }
     fun isIgnored(c: Context, fp: String): Boolean { val a = JSONArray(prefs(c).getString(IGNORED, "[]")); for (i in 0 until a.length()) if (a.optString(i) == fp) return true; return false }
     fun newId() = UUID.randomUUID().toString()
