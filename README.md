@@ -1,30 +1,28 @@
-# Pace Android
+# Pace Android v4
 
-Pace is an Android finance app built around the existing Pace web UI with native Android transaction-import features.
+Pace is the Android version of the finance PWA with native SMS and notification transaction import.
 
-## Included in v3
+## v4 changes
 
-- Bank SMS transaction detection.
-- Payment/bank notification detection using Android Notification Listener.
-- Context-aware debit/credit classification. For example, `Acct debited ... recipient credited` is treated as an expense because the user's account was debited.
-- Amount, merchant, transaction date, UPI/UTR/RRN reference and source extraction.
-- Review notification before live transactions are added.
-- Historical SMS import: choose multiple bank/payment sender IDs, select individual messages, parse them using their original dates, and import the selected transactions.
-- Duplicate protection using a transaction fingerprint.
-- Custom bank message rules with optional sample message and regex.
-- Every imported transaction remains editable after it is added, including type, amount, date, category, merchant/note and UPI/reference.
-- User-managed expense and income categories: add and rename categories.
-- Daily spending limit setting.
-- Daily spending line graph with the daily-limit reference line.
-- Existing monthly income/expense and six-month trend views.
-- Local device storage through the existing Pace data store.
+- Historical SMS import grouped by calendar date.
+- Each date has its own **Select all** checkbox.
+- A global **Select all messages** option is also available.
+- Individual SMS messages can still be selected/deselected.
+- Up to 3000 selected-sender SMS messages are grouped by date for review.
+- Transaction parser preserves the original SMS transaction date when one is present.
+- Fixed the Kotlin `Matcher.groups.getOrNull()` compilation error.
+- `versionCode` increased to 4 and `versionName` to 4.0.0.
+- GitHub Actions now uses a persistent signing key so later APKs can update an installed Pace APK.
+- Live transaction notifications remain review-first: they are not automatically added.
 
-## Android permissions
+## GitHub Actions signing setup
 
-Pace requests SMS access for transaction detection and historical import, and notification access for payment/bank notification detection. These permissions are optional until the corresponding features are used, and Android displays the system permission/access UI.
+Read `SIGNING_SETUP.md` once and add the four repository secrets before running the workflow.
 
 ## Build
 
-GitHub Actions builds both a debug APK and an unsigned release APK. The workflow uses Android SDK 35, JDK 17 and Gradle 8.9.
+The workflow builds:
+- `pace-debug-apk` -> signed `app-debug.apk`
+- `pace-release-apk` -> signed `app-release.apk`
 
-The debug APK is published as the `pace-debug-apk` workflow artifact.
+The signing key is never stored in the repository. GitHub Actions reconstructs it from repository secrets.

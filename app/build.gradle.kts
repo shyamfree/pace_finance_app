@@ -1,8 +1,34 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 
 android { namespace = "com.pace.app"; compileSdk = 35
-    defaultConfig { applicationId = "com.pace.app"; minSdk = 26; targetSdk = 35; versionCode = 3; versionName = "3.0.0" }
-    buildTypes { release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }
+    defaultConfig { applicationId = "com.pace.app"; minSdk = 26; targetSdk = 35; versionCode = 4; versionName = "4.0.0" }
+
+    signingConfigs {
+        create("stable") {
+            val keystorePath = System.getenv("PACE_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("PACE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("PACE_KEY_ALIAS")
+                keyPassword = System.getenv("PACE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // GitHub Actions uses the same persistent key for every build so APK updates
+            // install over the previous Pace APK instead of failing with a signature mismatch.
+            val stable = signingConfigs.findByName("stable")
+            if (stable != null && !System.getenv("PACE_KEYSTORE_PATH").isNullOrBlank()) signingConfig = stable
+        }
+        release {
+            isMinifyEnabled = false
+            val stable = signingConfigs.findByName("stable")
+            if (stable != null && !System.getenv("PACE_KEYSTORE_PATH").isNullOrBlank()) signingConfig = stable
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
 }

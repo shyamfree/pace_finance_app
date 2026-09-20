@@ -1,0 +1,8 @@
+.gradle/
+build/
+*/build/
+local.properties
+pace-signing.jks
+pace-signing.base64
+*.jks
+*.keystore

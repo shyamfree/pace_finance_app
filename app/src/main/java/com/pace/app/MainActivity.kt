@@ -160,35 +160,143 @@ class MainActivity : AppCompatActivity() {
 
     private data class SmsRow(val id: Long, val address: String, val body: String, val date: Long)
 
+    private data class SmsDateGroup(
+        val dateKey: String,
+        val rows: MutableList<SmsRow>,
+        val header: CheckBox,
+        val children: MutableList<CheckBox>
+    )
+
     private fun chooseMessages(selectedSenders: List<String>) {
         val rows = mutableListOf<SmsRow>()
         val projection = arrayOf("_id", "address", "body", "date")
         val cursor = contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, projection, null, null, "date DESC")
         cursor?.use { c ->
-            val idxId = c.getColumnIndex("_id"); val idxAddress = c.getColumnIndex("address"); val idxBody = c.getColumnIndex("body"); val idxDate = c.getColumnIndex("date")
-            while (c.moveToNext() && rows.size < 500) {
+            val idxId = c.getColumnIndex("_id")
+            val idxAddress = c.getColumnIndex("address")
+            val idxBody = c.getColumnIndex("body")
+            val idxDate = c.getColumnIndex("date")
+            while (c.moveToNext() && rows.size < 3000) {
                 val address = c.getString(idxAddress) ?: ""
                 if (!selectedSenders.contains(address)) continue
                 rows.add(SmsRow(c.getLong(idxId), address, c.getString(idxBody) ?: "", c.getLong(idxDate)))
             }
         }
-        if (rows.isEmpty()) { Toast.makeText(this, "No messages found for the selected senders.", Toast.LENGTH_SHORT).show(); return }
-        val labels = rows.map { r ->
-            val d = SimpleDateFormat("dd MMM yyyy HH:mm", Locale.US).format(Date(r.date))
-            "$d  ·  ${r.address}\n${r.body.replace("\\n", " ").take(110)}"
-        }.toTypedArray()
-        val checked = BooleanArray(rows.size)
-        AlertDialog.Builder(this).setTitle("Select messages (${rows.size})")
-            .setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
-            .setNegativeButton("Cancel", null).setPositiveButton("Extract selected") { _, _ ->
-                var count = 0
-                rows.forEachIndexed { i, row ->
-                    if (!checked[i]) return@forEachIndexed
-                    val result = TransactionParser.parse(this, "HISTORICAL_SMS", row.address, row.body, row.date) ?: return@forEachIndexed
-                    addToWeb(result.tx); count++
+        if (rows.isEmpty()) {
+            Toast.makeText(this, "No messages found for the selected senders.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Group the inbox by calendar date so a whole day can be selected at once.
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val displayFormat = SimpleDateFormat("dd MMM yyyy", Locale.US)
+        val groups = linkedMapOf<String, MutableList<SmsRow>>()
+        rows.sortedByDescending { it.date }.forEach { row ->
+            val key = dateFormat.format(Date(row.date))
+            groups.getOrPut(key) { mutableListOf() }.add(row)
+        }
+
+        val scroll = ScrollView(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(28, 12, 28, 12)
+        }
+        scroll.addView(root)
+
+        val summary = TextView(this).apply {
+            text = "${rows.size} messages across ${groups.size} dates. Select only the dates/messages you want to import."
+            setPadding(0, 0, 0, 16)
+        }
+        root.addView(summary)
+
+        val selectAll = CheckBox(this).apply {
+            text = "Select all messages"
+            setPadding(0, 0, 0, 10)
+        }
+        root.addView(selectAll)
+
+        val groupStates = mutableListOf<SmsDateGroup>()
+        var bulkUpdating = false
+
+        groups.forEach { (dateKey, dateRows) ->
+            val header = CheckBox(this).apply {
+                text = "${displayFormat.format(Date(dateRows.first().date))} (${dateRows.size}) — Select all"
+                setPadding(0, 12, 0, 6)
+            }
+            root.addView(header)
+
+            val children = mutableListOf<CheckBox>()
+            val state = SmsDateGroup(dateKey, dateRows, header, children)
+            groupStates.add(state)
+
+            header.setOnCheckedChangeListener { _, checked ->
+                if (bulkUpdating) return@setOnCheckedChangeListener
+                bulkUpdating = true
+                children.forEach { it.isChecked = checked }
+                bulkUpdating = false
+            }
+
+            dateRows.forEach { row ->
+                val messageDate = SimpleDateFormat("HH:mm", Locale.US).format(Date(row.date))
+                val label = "${messageDate}  ·  ${row.address}\n${row.body.replace("\\n", " ").replace("\\r", " ").take(180)}"
+                val cb = CheckBox(this).apply {
+                    text = label
+                    setPadding(8, 6, 0, 10)
                 }
+                children.add(cb)
+                root.addView(cb)
+                cb.setOnCheckedChangeListener { _, _ ->
+                    if (bulkUpdating) return@setOnCheckedChangeListener
+                    val all = children.isNotEmpty() && children.all { it.isChecked }
+                    val none = children.none { it.isChecked }
+                    bulkUpdating = true
+                    header.isChecked = all
+                    if (none) header.isChecked = false
+                    bulkUpdating = false
+                }
+            }
+        }
+
+        selectAll.setOnCheckedChangeListener { _, checked ->
+            bulkUpdating = true
+            groupStates.forEach { group ->
+                group.header.isChecked = checked
+                group.children.forEach { it.isChecked = checked }
+            }
+            bulkUpdating = false
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Select messages by date")
+            .setView(scroll)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Extract selected", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selectedRows = mutableListOf<SmsRow>()
+                groupStates.forEach { group ->
+                    group.children.forEachIndexed { index, checkBox ->
+                        if (checkBox.isChecked) selectedRows.add(group.rows[index])
+                    }
+                }
+                if (selectedRows.isEmpty()) {
+                    Toast.makeText(this, "Select at least one message or date.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+
+                var count = 0
+                selectedRows.forEach { row ->
+                    val result = TransactionParser.parse(this, "HISTORICAL_SMS", row.address, row.body, row.date) ?: return@forEach
+                    addToWeb(result.tx)
+                    count++
+                }
+                dialog.dismiss()
                 Toast.makeText(this, "Imported $count matching transactions. You can edit them anytime.", Toast.LENGTH_LONG).show()
-            }.show()
+            }
+        }
+        dialog.show()
     }
 
     inner class NativeBridge(private val a: MainActivity) {
