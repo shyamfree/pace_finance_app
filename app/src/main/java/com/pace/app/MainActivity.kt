@@ -259,10 +259,11 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 12, 0, 12)
         }
         root.addView(status)
+        // Put the sender list inside the ScrollView BEFORE attaching the ScrollView
+        // to the root. A View can only have one parent; adding listContainer to root
+        // first and then to ScrollView causes an IllegalStateException and closes the app.
         val listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(listContainer)
         val scroll = ScrollView(this).apply { addView(listContainer) }
-        root.removeView(listContainer)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val bottom = LinearLayout(this).apply {
@@ -318,6 +319,7 @@ class MainActivity : AppCompatActivity() {
                 title.text = "STEP 2 OF 3\nSelect senders"
                 status.text = "${counts.values.sum()} SMS found from ${counts.size} senders. Select the bank/payment senders you want to import."
                 val selected = mutableSetOf<String>()
+                var updatingSenderChecks = false
 
                 val selectAll = CheckBox(this).apply { text = "Select all senders" }
                 listContainer.addView(selectAll)
@@ -329,15 +331,23 @@ class MainActivity : AppCompatActivity() {
                     }
                     boxes.add(entry.key to cb)
                     cb.setOnCheckedChangeListener { _, checked ->
+                        if (updatingSenderChecks) return@setOnCheckedChangeListener
                         if (checked) selected.add(entry.key) else selected.remove(entry.key)
                         next.isEnabled = selected.isNotEmpty()
-                        if (!checked) selectAll.isChecked = false
+                        updatingSenderChecks = true
+                        selectAll.isChecked = boxes.isNotEmpty() && boxes.all { it.second.isChecked }
+                        updatingSenderChecks = false
                     }
                     listContainer.addView(cb)
                 }
                 selectAll.setOnCheckedChangeListener { _, checked ->
-                    boxes.forEach { (_, cb) -> cb.isChecked = checked }
-                    if (checked) selected.addAll(counts.keys) else selected.clear()
+                    if (updatingSenderChecks) return@setOnCheckedChangeListener
+                    updatingSenderChecks = true
+                    boxes.forEach { (address, cb) ->
+                        cb.isChecked = checked
+                        if (checked) selected.add(address) else selected.remove(address)
+                    }
+                    updatingSenderChecks = false
                     next.isEnabled = selected.isNotEmpty()
                 }
                 next.setOnClickListener {
