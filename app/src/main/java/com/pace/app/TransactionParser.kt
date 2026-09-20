@@ -69,7 +69,7 @@ object TransactionParser {
         if (!customPattern.isNullOrBlank()) {
             try {
                 val m = Regex(customPattern).find(body)
-                val group = m?.groups?.getOrNull(1)?.value
+                val group = m?.groups?.get(1)?.value
                 val value = group?.replace(",", "")?.toDoubleOrNull()
                 if (value != null) return value
             } catch (_: Exception) { }
