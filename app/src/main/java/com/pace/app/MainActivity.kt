@@ -266,9 +266,7 @@ class MainActivity : AppCompatActivity() {
                 if (senders.isEmpty()) {
                     AlertDialog.Builder(this)
                         .setTitle("No SMS found")
-                        .setMessage("Pace successfully queried the SMS inbox, but no messages were found between ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(startMillis))} and ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(endMillis))}.
-
-Check that the messages are actually in the phone's SMS inbox and that the selected dates are correct.")
+                        .setMessage("Pace successfully queried the SMS inbox, but no messages were found between ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(startMillis))} and ${SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(endMillis))}.\n\nCheck that the messages are actually in the phone's SMS inbox and that the selected dates are correct.")
                         .setPositiveButton("OK", null)
                         .show()
                     return@runOnUiThread
