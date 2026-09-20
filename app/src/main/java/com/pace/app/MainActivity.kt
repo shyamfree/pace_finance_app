@@ -166,8 +166,8 @@ class MainActivity : AppCompatActivity() {
         if (!dialog.isShowing) dialog.show()
     }
 
-    private fun chooseImportDateRange() {
-        val dialog = Dialog(this)
+    private fun chooseImportDateRange(existingDialog: Dialog? = null) {
+        val dialog = existingDialog ?: Dialog(this)
         importWizardDialog = dialog
         dialog.setTitle("Import previous SMS")
         dialog.setCancelable(true)
@@ -199,14 +199,17 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, 0, 20)
         })
 
-        val fromButton = makeWizardButton("FROM: ${dateFormat.format(fromCal.time)}") {
+        lateinit var fromButton: Button
+        fromButton = makeWizardButton("FROM: ${dateFormat.format(fromCal.time)}") {
             DatePickerDialog(this, { _, y, m, d ->
                 fromCal.set(y, m, d, 0, 0, 0)
                 fromCal.set(Calendar.MILLISECOND, 0)
                 fromButton.text = "FROM: ${dateFormat.format(fromCal.time)}"
             }, fromCal.get(Calendar.YEAR), fromCal.get(Calendar.MONTH), fromCal.get(Calendar.DAY_OF_MONTH)).show()
         }
-        val toButton = makeWizardButton("TO: ${dateFormat.format(toCal.time)}") {
+
+        lateinit var toButton: Button
+        toButton = makeWizardButton("TO: ${dateFormat.format(toCal.time)}") {
             DatePickerDialog(this, { _, y, m, d ->
                 toCal.set(y, m, d, 23, 59, 59)
                 toCal.set(Calendar.MILLISECOND, 999)
@@ -266,7 +269,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.END
         }
-        val back = makeWizardButton("BACK") { chooseImportDateRange() }
+        val back = makeWizardButton("BACK") { chooseImportDateRange(dialog) }
         val next = makeWizardButton("NEXT: FIND MESSAGES") { }
         next.isEnabled = false
         bottom.addView(back)
